@@ -867,7 +867,45 @@ class XHS_Apis():
             msg = str(e)
         return success, msg, video_addr
 
-
+    def follow_user(self, target_user_id: str, cookies_str: str, proxies: dict = None):
+        """
+            关注指定用户
+            :param target_user_id: 要关注的用户ID
+            :param cookies_str: 用户登录cookies字符串
+            :param proxies: 代理设置（可选）
+            :return: (success, msg, res_json) 
+                     success - 请求是否成功
+                     msg - 返回消息或错误信息
+                     res_json - 完整的响应数据
+        """
+        res_json = None
+        try:
+            api = "/api/sns/web/v1/user/follow"
+            data = {
+                "target_user_id": target_user_id  # 构造关注请求的payload
+            }
+            # 生成请求头、cookies和签名数据
+            headers, cookies, trans_data = generate_request_params(cookies_str, api, data)
+            
+            # 发送POST请求
+            response = requests.post(
+                self.base_url + api,
+                headers=headers,        # 包含x-t, x-s等鉴权头
+                data=trans_data,        # 已签名的请求体
+                cookies=cookies,        # 用户会话cookies
+                proxies=proxies         # 可选代理
+            )
+            
+            res_json = response.json()
+            success = res_json.get("success", False)
+            msg = res_json.get("msg", "")
+            
+        except Exception as e:
+            success = False
+            msg = f"关注用户失败: {str(e)}"
+            
+        return success, msg, res_json
+        
     @staticmethod
     def get_note_no_water_img(img_url):
         """
@@ -938,6 +976,29 @@ if __name__ == '__main__':
     success, msg, note_all_comment = xhs_apis.get_note_all_comment(note_url, cookies_str)
     logger.info(f'获取笔记评论结果 {json.dumps(note_all_comment, ensure_ascii=False)}: {success}, msg: {msg}')
 
+
+"""
+curl 'https://edith.xiaohongshu.com/api/sns/web/v1/user/follow' \
+  -H 'authority: edith.xiaohongshu.com' \
+  -H 'accept: application/json, text/plain, */*' \
+  -H 'accept-language: zh-CN,zh;q=0.9' \
+  -H 'content-type: application/json;charset=UTF-8' \
+  -H 'origin: https://www.xiaohongshu.com' \
+  -H 'referer: https://www.xiaohongshu.com/' \
+  -H 'sec-ch-ua: "Not A(Brand";v="8", "Chromium";v="132"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Linux"' \
+  -H 'sec-fetch-dest: empty' \
+  -H 'sec-fetch-mode: cors' \
+  -H 'sec-fetch-site: same-site' \
+  -H 'user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36' \
+  -H 'x-b3-traceid: ' \
+  -H 'x-mns: -PVH……………………………' \
+  -H 'x-t: 1744246377188' \
+  -H 'x-xray-traceid: ' \
+  --data-raw '{"target_user_id":""}' \
+  --compressed
+"""
 
 
 
