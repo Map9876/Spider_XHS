@@ -4,130 +4,93 @@ from apis.pc_apis import XHS_Apis
 from xhs_utils.common_utils import init
 from xhs_utils.data_util import handle_note_info, download_note, save_to_xlsx
 
-
 class Data_Spider():
     def __init__(self):
         self.xhs_apis = XHS_Apis()
+        # 用于记录上次处理的最后一个粉丝ID
+        self.last_processed_id = None
+        # 存储已处理ID的日志文件路径
+        self.processed_log = "processed_fans.log"
 
-    def spider_note(self, note_url: str, cookies_str: str, proxies=None):
-        """
-        爬取一个笔记的信息
-        :param note_url:
-        :param cookies_str:
-        :return:
-        """
-        note_info = None
+    def _load_last_processed_id(self):
+        """从日志文件加载上次处理的最后一个ID"""
+        if os.path.exists(self.processed_log):
+            with open(self.processed_log, 'r') as f:
+                return f.read().strip()
+        return None
+
+    def _save_last_processed_id(self, fan_id):
+        """保存最后处理的ID到日志文件"""
+        with open(self.processed_log, 'w') as f:
+            f.write(str(fan_id))
+
+    def follow(self, cookies_str: str, proxies=None):
+        """获取所有新增粉丝，并返回需要处理的新增粉丝列表"""
         try:
-            success, msg, note_info = self.xhs_apis.get_note_info(note_url, cookies_str, proxies)
-            if success:
-                note_info = note_info['data']['items'][0]
-                note_info['url'] = note_url
-                note_info = handle_note_info(note_info)
+            # 加载上次处理的最后一个ID
+            self.last_processed_id = self._load_last_processed_id()
+            
+            success, msg, connections_list = self.xhs_apis.get_all_new_connections(cookies_str)
+            if not success:
+                raise Exception(msg)
+                
+            # 筛选出未处理过的新粉丝
+            new_fans = []
+            for fan in connections_list:
+                if self.last_processed_id and fan['id'] == self.last_processed_id:
+                    break
+                new_fans.append(fan)
+            
+            # 如果有新粉丝，更新最后处理的ID
+            if new_fans:
+                self.last_processed_id = new_fans[0]['id']
+                self._save_last_processed_id(self.last_processed_id)
+            
+            logger.info(f'获取到 {len(new_fans)} 个新增粉丝')
+            return new_fans, True, "成功获取新增粉丝"
+            
         except Exception as e:
-            success = False
-            msg = e
-        logger.info(f'爬取笔记信息 {note_url}: {success}, msg: {msg}')
-        return success, msg, note_info
-
-    def spider_some_note(self, notes: list, cookies_str: str, base_path: dict, save_choice: str, excel_name: str = '', proxies=None):
-        """
-        爬取一些笔记的信息
-        :param notes:
-        :param cookies_str:
-        :param base_path:
-        :return:
-        """
-        if (save_choice == 'all' or save_choice == 'excel') and excel_name == '':
-            raise ValueError('excel_name 不能为空')
-        note_list = []
-        for note_url in notes:
-            success, msg, note_info = self.spider_note(note_url, cookies_str, proxies)
-            if note_info is not None and success:
-                note_list.append(note_info)
-        for note_info in note_list:
-            if save_choice == 'all' or save_choice == 'media':
-                download_note(note_info, base_path['media'])
-        if save_choice == 'all' or save_choice == 'excel':
-            file_path = os.path.abspath(os.path.join(base_path['excel'], f'{excel_name}.xlsx'))
-            save_to_xlsx(note_list, file_path)
-
-
-    def spider_user_all_note(self, user_url: str, cookies_str: str, base_path: dict, save_choice: str, excel_name: str = '', proxies=None):
-        """
-        爬取一个用户的所有笔记
-        :param user_url:
-        :param cookies_str:
-        :param base_path:
-        :return:
-        """
-        note_list = []
+            logger.error(f'获取新增粉丝失败: {str(e)}')
+            return [], False, str(e)
+        
+    def follow_user(self, target_user_id: str, cookies_str: str, proxies=None):
+        """关注指定用户"""
         try:
-            success, msg, all_note_info = self.xhs_apis.get_user_all_notes(user_url, cookies_str, proxies)
-            if success:
-                logger.info(f'用户 {user_url} 作品数量: {len(all_note_info)}')
-                for simple_note_info in all_note_info:
-                    note_url = f"https://www.xiaohongshu.com/explore/{simple_note_info['note_id']}?xsec_token={simple_note_info['xsec_token']}"
-                    note_list.append(note_url)
-            if save_choice == 'all' or save_choice == 'excel':
-                excel_name = user_url.split('/')[-1].split('?')[0]
-            self.spider_some_note(note_list, cookies_str, base_path, save_choice, excel_name, proxies)
+            success, msg, res_json = self.xhs_apis.follow_user(target_user_id, cookies_str)
+            logger.info(f'关注用户 {target_user_id}: {success}, msg: {msg}')
+            return res_json, success, msg
         except Exception as e:
-            success = False
-            msg = e
-        logger.info(f'爬取用户所有视频 {user_url}: {success}, msg: {msg}')
-        return note_list, success, msg
-
-    def spider_some_search_note(self, query: str, require_num: int, cookies_str: str, base_path: dict, save_choice: str, sort="general", note_type=0,  excel_name: str = '', proxies=None):
-        """
-            指定数量搜索笔记，设置排序方式和笔记类型和笔记数量
-            :param query 搜索的关键词
-            :param require_num 搜索的数量
-            :param cookies_str 你的cookies
-            :param base_path 保存路径
-            :param sort 排序方式 general:综合排序, time_descending:时间排序, popularity_descending:热度排序
-            :param note_type 笔记类型 0:全部, 1:视频, 2:图文
-            返回搜索的结果
-        """
-        note_list = []
-        try:
-            success, msg, notes = self.xhs_apis.search_some_note(query, require_num, cookies_str, sort, note_type, proxies)
-            if success:
-                notes = list(filter(lambda x: x['model_type'] == "note", notes))
-                logger.info(f'搜索关键词 {query} 笔记数量: {len(notes)}')
-                for note in notes:
-                    note_url = f"https://www.xiaohongshu.com/explore/{note['id']}?xsec_token={note['xsec_token']}"
-                    note_list.append(note_url)
-            if save_choice == 'all' or save_choice == 'excel':
-                excel_name = query
-            self.spider_some_note(note_list, cookies_str, base_path, save_choice, excel_name, proxies)
-        except Exception as e:
-            success = False
-            msg = e
-        logger.info(f'搜索关键词 {query} 笔记: {success}, msg: {msg}')
-        return note_list, success, msg
+            logger.error(f'关注用户 {target_user_id} 失败: {str(e)}')
+            return None, False, str(e)
+    
+    def auto_follow_new_fans(self, cookies_str: str, proxies=None):
+        """自动关注所有新增粉丝"""
+        new_fans, success, msg = self.follow(cookies_str, proxies)
+        if not success:
+            return False, msg
+        
+        results = []
+        for fan in new_fans:
+            user_id = fan['user']['userid']
+            res_json, success, msg = self.follow_user(user_id, cookies_str, proxies)
+            results.append({
+                'user_id': user_id,
+                'nickname': fan['user']['nickname'],
+                'success': success,
+                'message': msg
+            })
+        
+        # 记录处理结果
+        logger.info(f"共处理 {len(results)} 个新粉丝")
+        for result in results:
+            status = "成功" if result['success'] else "失败"
+            logger.info(f"{status}关注用户: {result['nickname']}({result['user_id']}) - {result['message']}")
+        
+        return True, "自动关注完成"
 
 if __name__ == '__main__':
-    """
-        此文件为爬虫的入口文件，可以直接运行
-        apis/pc_apis.py 为爬虫的api文件，包含小红书的全部数据接口，可以继续封装，感谢star和follow
-    """
     cookies_str, base_path = init()
     data_spider = Data_Spider()
-    # save_choice: all: 保存所有的信息, media: 保存视频和图片, excel: 保存到excel
-    # save_choice 为 excel 或者 all 时，excel_name 不能为空
-    # 1
-    notes = [
-        r'https://www.xiaohongshu.com/explore/67d7c713000000000900e391?xsec_token=AB1ACxbo5cevHxV_bWibTmK8R1DDz0NnAW1PbFZLABXtE=&xsec_source=pc_user',
-    ]
-    data_spider.spider_some_note(notes, cookies_str, base_path, 'all', 'test')
-
-    # 2
-    user_url = 'https://www.xiaohongshu.com/user/profile/67a332a2000000000d008358?xsec_token=ABTf9yz4cLHhTycIlksF0jOi1yIZgfcaQ6IXNNGdKJ8xg=&xsec_source=pc_feed'
-    data_spider.spider_user_all_note(user_url, cookies_str, base_path, 'all')
-
-    # 3
-    query = "榴莲"
-    query_num = 10
-    sort = "general"
-    note_type = 0
-    data_spider.spider_some_search_note(query, query_num, cookies_str, base_path, 'all', sort, note_type)
+    
+    # 自动关注所有新增粉丝
+    data_spider.auto_follow_new_fans(cookies_str)
