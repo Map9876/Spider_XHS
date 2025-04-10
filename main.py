@@ -89,8 +89,10 @@ class Data_Spider():
         return True, "自动关注完成"
 
 if __name__ == '__main__':
-    cookies_str, base_path = init()
+    import sys
+    if len(sys.argv) > 1:
+        cookies_str = sys.argv[1]
+    else:
+        cookies_str, base_path = init()
     data_spider = Data_Spider()
-    
-    # 自动关注所有新增粉丝
     data_spider.auto_follow_new_fans(cookies_str)
